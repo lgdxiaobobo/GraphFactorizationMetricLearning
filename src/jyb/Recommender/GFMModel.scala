@@ -215,8 +215,9 @@ case class GFMModel(setting: Setting) {
             ghCollector += ((i, scaled(_tui, -pullScale)))
             // push
             val negsPos = negs.map(hBD.value.apply)
-            val (j, nk) = approRank(this.margin, wu, hi, negsPos)
+            val (jdx, nk) = approRank(this.margin, wu, hi, negsPos)
             if (nk > 0) {
+              val j = negs(jdx)
               val nPos = b.dstPtrs(u+1) - b.dstPtrs(u)
               val rank = ((nItems - nPos) * nk * 1.0 / this.negNum).toInt
               val kui = log2(rank + 2.0)
