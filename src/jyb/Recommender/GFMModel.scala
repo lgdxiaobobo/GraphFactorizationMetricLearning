@@ -59,7 +59,7 @@ case class GFMModel(setting: Setting) {
           val AG = js
             .map(gain(wu, unused, iPos))
             .sum
-          div(AG, js.length)
+          divide(AG, js.length)
       }
     comb.map(_._2).mean()
   }
@@ -72,11 +72,13 @@ case class GFMModel(setting: Setting) {
     // define partitioner
     val myPart = new FMPart(this.blockNum)
     // parted interactions
-    val partedInteraction = partMetric(train, myPart)
-      .persist()
+    val partedInteraction =
+      partMetric(train, myPart)
+        .persist()
     // blocked based on users
     val userBasedBlocks =
       blockedInteraction(partedInteraction, myPart)
+        .persist()
     // seed generator for initialize and sampling
     val seedGen = new Random(seed)
     // initialize
@@ -186,7 +188,7 @@ case class GFMModel(setting: Setting) {
 
   def learnGradient(blocks: RDD[(Int, Block)],
                     blockedPos: RDD[(Int, Points)],
-                    itemPos: Map[Int, Point], seed: Long): 
+                    itemPos: Map[Int, Point], seed: Long):
   (RDD[(Int, Points)], Array[(Int, Point)]) = {
     val sc = blocks.sparkContext
     val hBD = sc.broadcast(itemPos)
