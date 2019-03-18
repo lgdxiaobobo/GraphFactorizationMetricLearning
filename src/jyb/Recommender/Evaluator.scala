@@ -73,14 +73,14 @@ case class Evaluator(k: Int) {
           loss
         else
           loss + 1.0 / (1.0 + rank)
-    } / this.k
+    } / topK.length
   }
 
   def getMap(topK: Array[Int],
              is: Set[Int]):
   Double = {
     val hits = topK.count(is.contains)
-    hits * 1.0 / this.k //is.size
+    hits * 1.0 / topK.length //is.size
   }
 
   def getNDCG(topK: Array[Int],
