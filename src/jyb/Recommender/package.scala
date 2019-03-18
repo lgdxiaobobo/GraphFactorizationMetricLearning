@@ -77,7 +77,9 @@ package object Recommender {
 
   def norm2(p: Point):
   Double = {
-    p.map(pow2).sum
+    val origin =
+      Array.fill(p.length)(0.0)
+    distance2(p, origin)
   }
 
   def pow2(x: Double): Double =
@@ -85,11 +87,6 @@ package object Recommender {
 
   def log2(x: Double): Double =
     math.log(x) / math.log(2.0)
-
-  def div(x: Double, y: Double):
-  Double =
-    if (y == 0) 0.0
-    else 1.0 * x / y
 
   def scaled(p: Point, w: Double):
   Point =
@@ -188,14 +185,13 @@ package object Recommender {
         mutable.ArrayBuilder.make[Int]
       val dstPtrsBuilder =
         mutable.ArrayBuilder.make[Int]
-      val dstIdsBuilder =
-        mutable.ArrayBuilder.make[Int]
-      val distancesBuilder =
-        mutable.ArrayBuilder.make[Double]
+      val nSample = dupSrcIds.length
+      val dstIdsBuilder = Array.fill(nSample)(0)
+      val distancesBuilder = Array.fill(nSample)(0.0)
       val lastIndex = sortedSrcIds.foldLeft((-1, 0)){
         case ((preSrcId, sz), (srcId, dupIdx)) =>
-          dstIdsBuilder += dupDstIds(dupIdx)
-          distancesBuilder += dupDistances(dupIdx)
+          dstIdsBuilder(sz) = dupDstIds(dupIdx)
+          distancesBuilder(sz) = dupDistances(dupIdx)
           if (preSrcId == -1 || preSrcId != srcId){
             uniqSrcIdsBuilder += srcId
             dstPtrsBuilder += sz
@@ -206,8 +202,8 @@ package object Recommender {
       }._2
       dstPtrsBuilder += lastIndex
       Block(uniqSrcIdsBuilder.result(),
-        dstIdsBuilder.result(), dstPtrsBuilder.result(),
-        distancesBuilder.result())
+        dstIdsBuilder, dstPtrsBuilder.result(),
+        distancesBuilder)
     }
   }
 
@@ -239,17 +235,11 @@ package object Recommender {
      .collect().toMap
   }
 
-  def getIndices(indices: Array[Int],
-                  l: Int, r: Int):
-  Array[Int] = 
-    indices.slice(l, r)
-  
-
-  def pushLoss(m: Double, wu: Point, l: Int, 
+  def pushLoss(m: Double, wu: Point, l: Int,
                r: Int, indices: Array[Int], 
                itemPos: Map[Int, Point]):
   Double = {
-    val posItems = getIndices(indices, l, r)
+    val posItems = indices.slice(l, r)
     val usedSet = posItems.toSet
     val negItems = itemPos.keySet
       .diff(usedSet).toArray
@@ -300,8 +290,7 @@ package object Recommender {
     val userUsedMap = ptrs.indices.dropRight(1)
       .foldLeft(Map[Int, Set[Int]]()){
         case (dict, u) =>
-          val used =
-            getIndices(indices, ptrs(u), ptrs(u+1))
+          val used = indices.slice(ptrs(u), ptrs(u+1))
           dict + (u -> used.toSet)
       }
     Array.fill(bSize){
@@ -335,10 +324,9 @@ package object Recommender {
                 negsPos: Points):
   (Int, Int) = {
     val dui = distance2(wu, hi)
-    val negsDistances = 
-      negsPos.map(hj =>
-        margin + dui - distance2(wu, hj)
-      )
+    val negsDistances = negsPos.map{ hj =>
+      margin + dui - distance2(wu, hj)
+    }
     val nk = negsDistances.count(_ >= 0)
     val maxJ = negsDistances.tail.zipWithIndex
       .foldLeft((negsDistances.head, 0)){
