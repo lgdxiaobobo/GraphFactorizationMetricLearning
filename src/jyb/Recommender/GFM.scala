@@ -28,18 +28,46 @@ object GFM {
     // load data
     // RDD[Metric(u, i, d)]
     // d = 1.0 - s
-    val train0 = sc.textFile(trainDir)
-      .map(_.split('|'))
-      .map(formatToDistance)
-    val minD = train0.map(_.distance).min()
-    val train = train0.map{p =>
-      val d1 = (p.distance - minD) * 1.0 / (1.0 - minD)
-      Metric(p.src, p.dst, d1)
-    }
-    println(train.map(_.distance).max())
-    val test = sc.textFile(testDir)
-      .map(_.split('|'))
-      .map(formatToUsage)
+    // val train0 = sc.textFile(trainDir)
+    //   .map(_.split('|'))
+    //   .map(formatToDistance)
+    // val minD = train0.map(_.distance).min()
+    // val train = train0.map{p =>
+    //   val d1 = (p.distance - minD) * 1.0 / (1.0 - minD)
+    //   Metric(p.src, p.dst, d1)
+    // }
+    // println(train.map(_.distance).max())
+
+    val train = sc.parallelize(
+      Array(
+        Metric(0, 0, 0.2),
+        Metric(0, 2, 0.5),
+        Metric(1, 0, 0.8),
+        Metric(1, 1, 0.4),
+        Metric(2, 2, 0.3),
+        Metric(3, 1, 0.6),
+        Metric(3, 3, 0.2),
+        Metric(4, 2, 0.1),
+        Metric(5, 0, 0.1),
+        Metric(5, 3, 0.7),
+        Metric(6, 2, 0.5)
+      )
+    )
+
+    // val test = sc.textFile(testDir)
+    //   .map(_.split('|'))
+    //   .map(formatToUsage)
+    val test = sc.parallelize(
+      Array(
+        jyb.Usage(0, 3),
+        jyb.Usage(1, 3),
+        jyb.Usage(2, 1),
+        jyb.Usage(3, 0),
+        jyb.Usage(4, 1),
+        jyb.Usage(5, 2),
+        jyb.Usage(6, 2)
+      )
+    )
     /*
       1. since we don't consider cold-start problem in this work,
          we will simply filtered items in test-set but not in train-set
@@ -96,24 +124,17 @@ object GFM {
     val userUsedInTrain = train
       .map(p => (p.src, p.dst))
       .aggregateByKey(Set[Int]())(_ + _, _ ++ _)
-      .mapValues(items => (0, items))
+      .setName("used").persist()
     val userUsedInTest = test
       .map(p => (p.u, p.i))
       .aggregateByKey(Set[Int]())(_ + _, _ ++ _)
       .mapValues{future => future.intersect(iBD.value)}
       .filter(_._2.nonEmpty)
-      .mapValues(items => (1, items))
+      .setName("using").persist()
     // using reduce by key to combine usage
-    val combined = userUsedInTrain.union(userUsedInTest)
-      .aggregateByKey(Array[(Int, Set[Int])]())(_ :+ _, _ ++ _)
-      .filter(_._2.length > 1).map{case (u, usage) =>
-        val correct = usage.sortBy(_._1).map(_._2)
-        val usedInTrain = correct(0)
-        val usedInTest = correct(1).diff(usedInTrain)
-        (u, usedInTrain, usedInTest.toArray)
-      }.filter(_._3.nonEmpty)
+    val combined = userUsedInTrain.join(userUsedInTest)
     jyb.deleteIfExists(sc, tempDir)
-    combined.map{case (u, i1, i2) =>
+    combined.map{case (u, (i1, i2)) =>
       val uStr = u.toString
       val i1Str = i1
         .map(_.toString).mkString(",")
