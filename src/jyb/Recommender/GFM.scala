@@ -27,17 +27,21 @@ object GFM {
     require(jyb.isLocalFileExist(cfgDir), s"No setting files!")
     // load data
     // RDD[Metric(u, i, d)]
-    // d = 1.0 - s
-    // val train0 = sc.textFile(trainDir)
-    //   .map(_.split('|'))
-    //   .map(formatToDistance)
-    // val minD = train0.map(_.distance).min()
-    // val train = train0.map{p =>
-    //   val d1 = (p.distance - minD) * 1.0 / (1.0 - minD)
-    //   Metric(p.src, p.dst, d1)
-    // }
-    // println(train.map(_.distance).max())
+    // d = smax - s
+    val train0 = sc.textFile(trainDir)
+      .map(_.split('|'))
+      .map(formatToDistance)
+    val minD = train0.map(_.distance).min()
+    val train = train0.map{p =>
+      val d1 = p.distance - minD
+      Metric(p.src, p.dst, d1)
+    }
+    println(train.map(_.distance).stats())
+    val test = sc.textFile(testDir)
+      .map(_.split('|'))
+      .map(formatToUsage)
 
+    /*
     val train = sc.parallelize(
       Array(
         Metric(0, 0, 0.2),
@@ -54,9 +58,6 @@ object GFM {
       )
     )
 
-    // val test = sc.textFile(testDir)
-    //   .map(_.split('|'))
-    //   .map(formatToUsage)
     val test = sc.parallelize(
       Array(
         jyb.Usage(0, 3),
@@ -67,7 +68,7 @@ object GFM {
         jyb.Usage(5, 2),
         jyb.Usage(6, 2)
       )
-    )
+    )*/
     /*
       1. since we don't consider cold-start problem in this work,
          we will simply filtered items in test-set but not in train-set
@@ -89,7 +90,7 @@ object GFM {
       val evalModel = Evaluator(k)
       val perform =
         evalModel.eval(testWithUsedItems, userPosition, itemPosition)
-      println("[Top-$k] " + perform.toString)
+      println(s"[Top-$k] " + perform.toString)
     }
     // save optimized positions
     val userPosDir = jyb.concatPath(posDir, "user")
