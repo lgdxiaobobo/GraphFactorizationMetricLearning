@@ -61,7 +61,7 @@ case class EvalRank(){
     loss
   }
 
-  def eval(test: RDD[(Int, Array[Int], Array[Int])],
+  def eval(test: RDD[(Int, Set[Int], Set[Int])],
            userPos: RDD[(Int, Point)],
            itemPos: Map[Int, Point]):
   (Double, Double, Double) = {
