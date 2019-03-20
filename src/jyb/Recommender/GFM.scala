@@ -106,7 +106,7 @@ object GFM {
     jyb.deleteIfExists(sc, dir)
     position.map{
       case (i, pi) =>
-        s"%d:%s".format(i, pi.toString)
+        s"%d:%s".format(i, pi.mkString(","))
     }.repartition(8)
      .saveAsTextFile(dir)
     true
