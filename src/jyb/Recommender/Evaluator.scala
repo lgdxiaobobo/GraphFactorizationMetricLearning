@@ -19,11 +19,10 @@ case class Performance(map: Double,
 
 case class Evaluator(k: Int) {
 
-  private val iDCG = getIdealDCG()
   private val log2 = math.log(2.0)
 
   def dcgGain(rank: Int): Double =
-    this.log2 / math.log(rank + 2)
+    this.log2 / math.log(rank + 1)
 
   def getIdealDCG(): Double = {
     var loss = 0.0
@@ -53,11 +52,11 @@ case class Evaluator(k: Int) {
             val hj = hBD.value(j)
             (j, distance2(wu, hj))
           }.toArray
-        val topKList = getTopKList(itemsWithDistance)
-        val nDCG = getNDCG(topKList, testItems)
+        val topKList = getTopKList(itemsWithDistance, testItems.size)
         val map = getMap(topKList, testItems)
         val mrr = getMRR(topKList, testItems)
-        Performance(nDCG, map, mrr)
+        val nDCG = getNDCG(topKList, testItems)
+        Performance(map, mrr, nDCG)
       }
     val nUsers = performance.count()
     val total = performance.map(_._2).reduce(_ add _)
@@ -79,8 +78,13 @@ case class Evaluator(k: Int) {
   def getMap(topK: Array[Int],
              is: Set[Int]):
   Double = {
-    val hits = topK.count(is.contains)
-    hits * 1.0 / topK.length //is.size
+    val (a, b) = topK.zipWithIndex.foldLeft((0.0, 0)){
+      case ((ap, n), (j, jdx)) =>
+        val yij = if (is.contains(j)) 1 else 0
+        val pj = 1.0 * (n + yij) / (jdx + 1)
+        (ap + pj * yij, n + yij)
+    }
+    divide(a, b)
   }
 
   def getNDCG(topK: Array[Int],
@@ -93,11 +97,12 @@ case class Evaluator(k: Int) {
         else
           loss + dcgGain(rank)
     }
-    DCG / iDCG
+    DCG / getIdealDCG()
   }
 
-  def getTopKList(scores: Array[(Int, Double)]):
+  def getTopKList(scores: Array[(Int, Double)], maxSize: Int):
   Array[Int] = {
-    scores.sortBy(_._2).map(_._1).take(this.k)
+    scores.sortBy(_._2).map(_._1)
+      .take(this.k).take(maxSize)
   }
 }
