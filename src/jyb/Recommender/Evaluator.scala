@@ -48,10 +48,8 @@ case class EvalTopN(k: Int) {
 }
 
 case class EvalRank(){
-  private val log2 = math.log(2.0)
-
   def dcgGain(rank: Int): Double =
-    this.log2 / math.log(rank + 1)
+    divide(math.log(2.0), math.log(rank + 2))
 
   def getIdealDCG(k: Int): Double = {
     var loss = 0.0
@@ -127,7 +125,7 @@ case class EvalRank(){
     val DCG = topN.indices.foldLeft(0.0){
       case (dcg, idx) =>
         val j = topN(idx)
-        val wij = divide(log2, log2(idx + 2))
+        val wij = dcgGain(idx)
         val yij = if (is.contains(j)) 1 else 0
         dcg + wij * yij
     }
