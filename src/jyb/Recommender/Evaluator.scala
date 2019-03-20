@@ -1,32 +1,61 @@
 package jyb.Recommender
 
 import org.apache.spark.rdd.RDD
+import scala.collection.mutable
 
-case class Performance(map: Double,
-                       mrr: Double,
-                       ndcg: Double){
-  def add(elem: Performance): Performance = {
-    Performance(map + elem.map,
-      mrr + elem.mrr, ndcg + elem.ndcg)
+case class EvalTopN(k: Int) {
+
+  def eval(test: RDD[(Int, Set[Int], Set[Int])],
+           userPos: RDD[(Int, Point)],
+           itemPos: Map[Int, Point]):
+  (Double, Double) = {
+    val testKV = test.map{
+      case (u, i1, i2) => (u, (i1, i2))
+    }
+    val sc = test.sparkContext
+    val hBD = sc.broadcast(itemPos)
+    val performance = testKV.join(userPos)
+      .mapValues{case ((trainItems, testItems), wu) =>
+        val allItems = hBD.value.keySet
+        val itemsNotInTrain = allItems.diff(trainItems)
+        val itemsWithDistance = itemsNotInTrain
+          .map{j =>
+            val hj = hBD.value(j)
+            (j, distance2(wu, hj))
+          }.toArray
+        val topKList = getTopKList(itemsWithDistance, this.k)
+        val hits = topKList.count(testItems.contains)
+        val precision = divide(hits, this.k)
+        val recall = divide(hits, testItems.size)
+        (precision, recall)
+      }
+    val nUsers = performance.count()
+    val (tp, tr) = performance.map(_._2).reduce{
+      case ((p0, r0), (p1, r1)) =>
+        (p0 + p1, r0 + r1)
+    }
+    (divide(tp, nUsers), divide(tr, nUsers))
   }
 
-  def scaled(w: Double): Performance =
-    Performance(map / w, mrr / w, ndcg / w)
-
-  override def toString: String =
-    s"MAP:$map, MRR:$mrr, nDCG:$ndcg"
+  def getTopKList(scores: Array[(Int, Double)], k: Int):
+  Array[Int] = {
+    implicit  val ord: Ordering[(Int, Double)] =
+      Ordering.by(-_._2)
+    val pq = mutable.PriorityQueue[(Int, Double)]()
+    scores.foreach(p => pq.enqueue(p))
+    Array.fill(k)(pq.dequeue()._1)
+  }
 }
 
-case class Evaluator(k: Int) {
-
+case class EvalRank(){
   private val log2 = math.log(2.0)
 
   def dcgGain(rank: Int): Double =
     this.log2 / math.log(rank + 1)
 
-  def getIdealDCG(): Double = {
+  def getIdealDCG(k: Int): Double = {
     var loss = 0.0
-    for (i <- 0 until this.k){
+    for (i <- 0 until k){
       loss += dcgGain(i)
     }
     loss
@@ -35,17 +64,15 @@ case class Evaluator(k: Int) {
   def eval(test: RDD[(Int, Array[Int], Array[Int])],
            userPos: RDD[(Int, Point)],
            itemPos: Map[Int, Point]):
-  Performance = {
+  (Double, Double, Double) = {
     val testKV = test.map{
       case (u, i1, i2) => (u, (i1, i2))
     }
     val sc = test.sparkContext
     val hBD = sc.broadcast(itemPos)
     val performance = testKV.join(userPos)
-      .mapValues{case ((i1, i2), wu) =>
+      .mapValues{case ((trainItems, testItems), wu) =>
         val allItems = hBD.value.keySet
-        val trainItems = i1.toSet
-        val testItems = i2.toSet
         val itemsNotInTrain = allItems.diff(trainItems)
         val itemsWithDistance = itemsNotInTrain
           .map{j =>
@@ -53,56 +80,67 @@ case class Evaluator(k: Int) {
             (j, distance2(wu, hj))
           }.toArray
         val topKList = getTopKList(itemsWithDistance, testItems.size)
-        val map = getMap(topKList, testItems)
+        val map = getMAP(topKList, testItems)
         val mrr = getMRR(topKList, testItems)
-        val nDCG = getNDCG(topKList, testItems)
-        Performance(map, mrr, nDCG)
+        val ndcg = getNDCG(topKList, testItems)
+        (map, mrr, ndcg)
       }
     val nUsers = performance.count()
-    val total = performance.map(_._2).reduce(_ add _)
-    total.scaled(nUsers)
+    val (map, mrr, ndcg) = performance.map(_._2).reduce{
+      case ((map0, mrr0, ndcg0), (map1, mrr1, ndcg1)) =>
+        (map0 + map1, mrr0 + mrr1, ndcg0 + ndcg1)
+    }
+    (divide(map, nUsers),
+      divide(mrr, nUsers),
+      divide(ndcg, nUsers))
   }
 
-  def getMRR(topK: Array[Int],
-             is: Set[Int]):
+  def getMAP(topN: Array[Int], is: Set[Int]):
   Double = {
-    topK.zipWithIndex.foldLeft(0.0){
-      case (loss, (j, rank)) =>
-        if (!is.contains(j))
-          loss
-        else
-          loss + 1.0 / (1.0 + rank)
-    } / topK.length
-  }
-
-  def getMap(topK: Array[Int],
-             is: Set[Int]):
-  Double = {
-    val (a, b) = topK.zipWithIndex.foldLeft((0.0, 0)){
-      case ((ap, n), (j, jdx)) =>
+    val (map, sz) = topN.indices.foldLeft((0.0, 0)){
+      case ((ap, n), idx) =>
+        val j = topN(idx)
         val yij = if (is.contains(j)) 1 else 0
-        val pj = 1.0 * (n + yij) / (jdx + 1)
-        (ap + pj * yij, n + yij)
+        val rank = idx + 1
+        (ap + divide(n + yij, rank), n + yij)
     }
-    divide(a, b)
+    divide(map, sz)
   }
 
-  def getNDCG(topK: Array[Int],
-              is: Set[Int]):
+  def getMRR(topN: Array[Int], is: Set[Int]):
   Double = {
-    val DCG = topK.zipWithIndex.foldLeft(0.0){
-      case (loss, (j, rank)) =>
-        if (!is.contains(j))
-          loss
+    val mrr = topN.indices.foldLeft(0.0){
+      case (r, idx) =>
+        val j = topN(idx)
+        if (is.contains(j))
+          r + divide(1, idx + 1)
         else
-          loss + dcgGain(rank)
+          r
     }
-    DCG / getIdealDCG()
+    divide(mrr, is.size)
   }
 
-  def getTopKList(scores: Array[(Int, Double)], maxSize: Int):
-  Array[Int] = {
-    scores.sortBy(_._2).map(_._1)
-      .take(this.k).take(maxSize)
+  def getNDCG(topN: Array[Int], is: Set[Int]):
+  Double = {
+    val sz = topN.length
+    val iDCG = getIdealDCG(sz)
+    val DCG = topN.indices.foldLeft(0.0){
+      case (dcg, idx) =>
+        val j = topN(idx)
+        val wij = divide(log2, log2(idx + 2))
+        val yij = if (is.contains(j)) 1 else 0
+        dcg + wij * yij
+    }
+    divide(DCG, iDCG)
   }
+
+  def getTopKList(scores: Array[(Int, Double)], k: Int):
+    Array[Int] = {
+    implicit  val ord: Ordering[(Int, Double)] =
+      Ordering.by(-_._2)
+    val pq = mutable.PriorityQueue[(Int, Double)]()
+    scores.foreach(p => pq.enqueue(p))
+    Array.fill(k)(pq.dequeue()._1)
+  }
+
 }
