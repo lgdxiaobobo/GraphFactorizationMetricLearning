@@ -85,13 +85,20 @@ object GFM {
       model.train(train, testWithUsedItems, rng.nextLong())
     val loss = model.eval(testWithUsedItems, userPosition, itemPosition)
     println(s"performance in test-set is $loss")
+
+    val testForEval = testWithUsedItems
+      .map{case (u, i1, i2) => (u, i1.toSet, i2.toSet)}
     // evaluator
     Array(5, 10, 15, 20).foreach{k =>
-      val evalModel = Evaluator(k)
-      val perform =
-        evalModel.eval(testWithUsedItems, userPosition, itemPosition)
-      println(s"[Top-$k] " + perform.toString)
+      val evalModel = EvalTopN(k)
+      val (precision, recall) =
+        evalModel.eval(testForEval, userPosition, itemPosition)
+      println(s"[Top-$k] Precision: $precision, Recall: $recall")
     }
+    val evalModel = EvalRank()
+    val (map, mrr, ndcg) =
+      evalModel.eval(testForEval, userPosition, itemPosition)
+    println(s"MAP: $map, MRR: $mrr, NDCG: $ndcg")
     // save optimized positions
     val userPosDir = jyb.concatPath(posDir, "user")
     savePosition(userPosition, userPosDir)
